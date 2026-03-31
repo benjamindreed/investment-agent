@@ -3,4 +3,4 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .DS_Store
-.streamlit/
+.streamlit/secrets.toml

@@ -32,6 +32,18 @@ from robinhood_client import RobinhoodClient
 
 load_dotenv()
 
+
+def _secret(key: str, default: str = "") -> str:
+    """Read from env var first, then Streamlit secrets (for cloud deployment)."""
+    val = os.getenv(key, "")
+    if not val:
+        try:
+            val = st.secrets.get(key, default)
+        except Exception:
+            pass
+    return val or default
+
+
 st.set_page_config(
     page_title="Investment Opportunity Agent",
     page_icon="📈",
@@ -213,7 +225,7 @@ with st.sidebar:
 
     news_api_key = st.text_input(
         "NewsAPI Key (optional)",
-        value=os.getenv("NEWS_API_KEY", ""),
+        value=_secret("NEWS_API_KEY"),
         type="password",
         help="Provides broader news coverage. Free at newsapi.org",
     )
@@ -234,11 +246,11 @@ with st.sidebar:
         with st.form("rh_login"):
             rh_user = st.text_input(
                 "Email",
-                value=os.getenv("ROBINHOOD_USERNAME", ""),
+                value=_secret("ROBINHOOD_USERNAME"),
             )
             rh_pass = st.text_input(
                 "Password",
-                value=os.getenv("ROBINHOOD_PASSWORD", ""),
+                value=_secret("ROBINHOOD_PASSWORD"),
                 type="password",
             )
             rh_mfa = st.text_input("MFA Code (if required)", value="")
