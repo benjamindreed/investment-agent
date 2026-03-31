@@ -192,6 +192,25 @@ with st.sidebar:
 
     st.divider()
 
+    # 5-Year High Premium
+    col_t, col_l = st.columns([1, 3])
+    with col_t:
+        use_5yr_high = st.toggle("", value=True, key="tog_5yr", help="Enable 5-year high premium filter")
+    with col_l:
+        st.markdown("**5-Year High Premium**")
+    min_5yr_pct = st.slider(
+        "5yr high at least X% above current price",
+        min_value=0, max_value=200, value=20, step=5,
+        disabled=not use_5yr_high,
+        help="Finds stocks trading significantly below their 5-year peak.",
+    )
+    if use_5yr_high:
+        st.caption(f"5yr high ≥ current price + **{min_5yr_pct}%**")
+    else:
+        st.caption("_Filter off — 5yr high still shown in results_")
+
+    st.divider()
+
     news_api_key = st.text_input(
         "NewsAPI Key (optional)",
         value=os.getenv("NEWS_API_KEY", ""),
@@ -250,6 +269,7 @@ _active = []
 if use_market_cap:  _active.append(f"Mkt cap > ${min_cap/1e9:.0f}B")
 if use_pe:          _active.append(f"P/E ≤ {max_pe}")
 if use_volume:      _active.append(f"Vol {min_vol:.1f}–{max_vol:.1f}×")
+if use_5yr_high:    _active.append(f"5yr high ≥ +{min_5yr_pct}%")
 if use_sentiment:   _active.append(f"Neg. sentiment ({sentiment_days}d / {sentiment_weeks}w)")
 st.caption("  •  ".join(_active) if _active else "No filters active — showing full universe")
 
@@ -276,12 +296,14 @@ if run_scan:
             max_pe=max_pe                if use_pe         else 99999,
             min_vol_ratio=min_vol        if use_volume     else 0,
             max_vol_ratio=max_vol        if use_volume     else 99999,
+            min_5yr_high_pct=min_5yr_pct if use_5yr_high  else 0,
             progress_callback=ui_progress,
         )
 
     if df.empty:
         active_filters = [f for f, on in [
-            ("market cap", use_market_cap), ("P/E", use_pe), ("volume", use_volume)
+            ("market cap", use_market_cap), ("P/E", use_pe),
+            ("volume", use_volume), ("5yr high", use_5yr_high),
         ] if on]
         label = ", ".join(active_filters) if active_filters else "no active"
         st.warning(f"No stocks passed the {label} filter(s).")
@@ -354,7 +376,7 @@ if df is None:
     st.info("Configure your parameters in the sidebar and click **Run Full Scan** to begin.")
 
 elif df.empty:
-    n_active = sum([use_market_cap, use_pe, use_volume, use_sentiment])
+    n_active = sum([use_market_cap, use_pe, use_volume, use_5yr_high, use_sentiment])
     st.warning(f"No opportunities matched the {n_active} active filter{'s' if n_active != 1 else ''} in this scan.")
 
 else:
@@ -371,6 +393,17 @@ else:
         "price": "Price ($)", "market_cap": "Mkt Cap",
         "pe_ratio": "P/E", "volume_ratio": "Vol Ratio",
     }
+
+    if "5yr_high" in display_df.columns:
+        display_df["5yr_high_disp"] = display_df.apply(
+            lambda r: (
+                f"${r['5yr_high']:,.2f} (+{r['5yr_high_pct_above']:.0f}%)"
+                if pd.notna(r.get("5yr_high")) and pd.notna(r.get("5yr_high_pct_above"))
+                else "—"
+            ), axis=1
+        )
+        table_cols.append("5yr_high_disp")
+        col_rename["5yr_high_disp"] = "5yr High (↑%)"
 
     if "sentiment_score" in display_df.columns:
         display_df["sentiment"] = display_df["sentiment_score"].apply(
@@ -412,6 +445,13 @@ else:
         col5.metric("Sector", row["sector"])
         col6.metric("52W High", f"${row['52w_high']:,.2f}" if row.get("52w_high") else "N/A")
         col6.metric("52W Low", f"${row['52w_low']:,.2f}" if row.get("52w_low") else "N/A")
+        if pd.notna(row.get("5yr_high")) and pd.notna(row.get("5yr_high_pct_above")):
+            col6.metric(
+                "5yr High",
+                f"${row['5yr_high']:,.2f}",
+                delta=f"+{row['5yr_high_pct_above']:.1f}% above today",
+                delta_color="inverse",
+            )
         col7.metric(
             "Sentiment Score",
             f"{sent_data.get('avg_compound', 0):.3f}",

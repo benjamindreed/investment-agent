@@ -75,6 +75,7 @@ def screen_stocks(
     max_pe: float = 35.0,
     min_vol_ratio: float = 1.5,
     max_vol_ratio: float = 2.0,
+    min_5yr_high_pct: float = 0.0,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> pd.DataFrame:
     """
@@ -85,6 +86,8 @@ def screen_stocks(
         max_pe: Maximum trailing P/E ratio (>0).
         min_vol_ratio: Minimum today-volume / 20-day-avg-volume.
         max_vol_ratio: Maximum today-volume / 20-day-avg-volume.
+        min_5yr_high_pct: 5-year high must be at least this % above current price.
+                          0 disables the filter but still populates the column.
         progress_callback: Optional fn(current, total, message) for UI progress.
     """
     universe = get_stock_universe()
@@ -131,6 +134,24 @@ def screen_stocks(
                 or 0
             )
 
+            # --- 5-year high filter ---
+            five_yr_high = None
+            five_yr_high_pct = None
+            try:
+                hist_5y = yf.Ticker(ticker).history(period="5y")
+                if not hist_5y.empty:
+                    five_yr_high = round(float(hist_5y["High"].max()), 2)
+                    if price > 0:
+                        five_yr_high_pct = round(
+                            (five_yr_high - price) / price * 100, 1
+                        )
+            except Exception:
+                pass
+
+            if min_5yr_high_pct > 0:
+                if five_yr_high_pct is None or five_yr_high_pct < min_5yr_high_pct:
+                    continue
+
             vol_info = volume_map[ticker]
             results.append(
                 {
@@ -145,6 +166,8 @@ def screen_stocks(
                     "vol_ratio": vol_info["vol_ratio"],
                     "52w_high": info.get("fiftyTwoWeekHigh"),
                     "52w_low": info.get("fiftyTwoWeekLow"),
+                    "5yr_high": five_yr_high,
+                    "5yr_high_pct_above": five_yr_high_pct,
                 }
             )
         except Exception:
