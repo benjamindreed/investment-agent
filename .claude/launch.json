@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "investment-agent",
+      "runtimeExecutable": "/Library/Developer/CommandLineTools/usr/bin/python3",
+      "runtimeArgs": ["-c", "import os; os.chdir('/private/tmp'); os.execv('/Users/ricecracker/Library/Python/3.9/bin/streamlit', ['streamlit', 'run', '/private/tmp/investment_agent_new/app.py', '--server.headless', 'true', '--browser.gatherUsageStats', 'false', '--server.port', '8501'])"],
+      "port": 8501,
+      "autoPort": false
+    }
+  ]
+}
