@@ -2,9 +2,10 @@
 News fetching and sentiment analysis.
 
 Sources (in priority order):
-  1. NewsAPI  (requires NEWS_API_KEY in .env — 100 req/day on free tier)
-  2. yfinance built-in news feed
-  3. Google News RSS (no key required)
+  1. NewsAPI     (requires NEWS_API_KEY — 100 req/day on free tier)
+  2. X.com posts (requires X_BEARER_TOKEN — Basic tier $100/mo or above)
+  3. yfinance built-in news feed
+  4. Google News RSS (no key required)
 
 Sentiment is scored with VADER; a stock is flagged as having "negative media
 coverage" if its compound score average across recent articles is < -0.05.
@@ -102,6 +103,47 @@ def _yfinance_articles(ticker: str) -> list[dict]:
         return []
 
 
+def _x_posts(ticker: str, company_name: str, bearer_token: str, days: int = 35) -> list[dict]:
+    """
+    Fetch recent posts from X.com (Twitter) via the v2 search endpoint.
+    Requires a Bearer Token from developer.x.com (Basic tier or above).
+    Returns an empty list silently if the token is missing or the request fails.
+    """
+    if not bearer_token:
+        return []
+    start_time = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    # Exclude retweets; target cashtag and company name
+    query = f'(${ticker} OR "{company_name}") -is:retweet lang:en'
+    url = "https://api.twitter.com/2/tweets/search/recent"
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    params = {
+        "query": query,
+        "start_time": start_time,
+        "max_results": 100,
+        "tweet.fields": "created_at,text",
+    }
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        results = []
+        for tweet in data.get("data", []):
+            results.append(
+                {
+                    "title": tweet.get("text", "")[:200],
+                    "description": "",
+                    "published_at": tweet.get("created_at", ""),
+                    "source": "X.com",
+                    "url": f"https://x.com/i/web/status/{tweet.get('id', '')}",
+                }
+            )
+        return results
+    except Exception:
+        return []
+
+
 def _gnews_rss_articles(ticker: str, company_name: str) -> list[dict]:
     """Scrape Google News RSS (no API key required)."""
     query = f"{company_name} stock".replace(" ", "+")
@@ -139,6 +181,7 @@ def analyze_sentiment(
     company_name: str,
     news_api_key: str = "",
     days: int = 90,
+    x_bearer_token: str = "",
 ) -> dict:
     """
     Collect news for a ticker and compute aggregate VADER sentiment.
@@ -157,6 +200,9 @@ def analyze_sentiment(
 
     if news_api_key:
         articles_raw.extend(_newsapi_articles(ticker, company_name, news_api_key, days))
+
+    if x_bearer_token:
+        articles_raw.extend(_x_posts(ticker, company_name, x_bearer_token, days))
 
     # Always supplement with yfinance + Google News
     articles_raw.extend(_yfinance_articles(ticker))

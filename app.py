@@ -232,6 +232,13 @@ with st.sidebar:
         help="Provides broader news coverage. Free at newsapi.org",
     )
 
+    x_bearer_token = st.text_input(
+        "X.com Bearer Token (optional)",
+        value=_secret("X_BEARER_TOKEN"),
+        type="password",
+        help="Includes posts from X.com in sentiment analysis. Requires Basic tier ($100/mo) at developer.x.com",
+    )
+
     st.divider()
 
     # --- Brokerage login ---
@@ -310,7 +317,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        "Data: Yahoo Finance / NewsAPI / Google News\n"
+        "Data: Yahoo Finance / NewsAPI / Google News / X.com\n"
         "Trading: Robinhood (robin-stocks) · Alpaca (alpaca-py)\n\n"
         "_Not financial advice. Use at your own risk._"
     )
@@ -386,7 +393,8 @@ if run_scan:
                 )
                 sent_bar.progress((idx + 1) / total_sent)
                 result = analyze_sentiment(
-                    item["ticker"], item["name"], news_api_key, days=sentiment_days
+                    item["ticker"], item["name"], news_api_key,
+                    days=sentiment_days, x_bearer_token=x_bearer_token,
                 )
                 sentiment_map[item["ticker"]] = result
                 if result["has_negative_coverage"]:
