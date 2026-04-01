@@ -37,7 +37,7 @@ MIAMI_VICE_PALETTE = [
     ("Coral",          "#FF6B35"),
 ]
 
-_DEFAULT_COLOR = "#00C9C8"  # Ocean Teal
+_DEFAULT_COLOR = "#B44FFF"  # Electric Purple
 
 from screener import screen_stocks
 from sentiment import analyze_sentiment, filter_negative_coverage
