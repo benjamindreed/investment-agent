@@ -15,7 +15,10 @@ Not supported (no public retail trading API)
 --------------------------------------------
   Fidelity, Vanguard, Schwab retail accounts
 """
+import os
+import tempfile
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Dict, List, Optional, Tuple
 
 
@@ -81,17 +84,43 @@ class RobinhoodClient(BaseBrokerageClient):
         return self._logged_in
 
     def login(self, username: str = "", password: str = "", mfa_code: str = "", **_) -> Tuple[bool, str]:
-        try:
+        def _do_login():
             import robin_stocks.robinhood as rh
-            kwargs = dict(username=username, password=password, store_session=True)
+            # store_session=False avoids writing pickle files, which hang or fail
+            # on read-only filesystems (Streamlit Cloud).
+            kwargs: dict = dict(
+                username=username,
+                password=password,
+                store_session=False,
+                expiresIn=86400,
+            )
             if mfa_code:
                 kwargs["mfa_code"] = mfa_code
-            rh.login(**kwargs)
+            result = rh.login(**kwargs)
+            if not result or result.get("access_token") is None:
+                raise ValueError(f"Login rejected by Robinhood: {result}")
+            return result
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(_do_login)
+                future.result(timeout=30)
             self._logged_in = True
             return True, "Connected to Robinhood."
-        except Exception as e:
+        except FuturesTimeoutError:
+            self._logged_in = False
+            return False, "Login timed out after 30 seconds. Check your credentials and try again."
+        except ValueError as e:
             self._logged_in = False
             return False, str(e)
+        except Exception as e:
+            self._logged_in = False
+            msg = str(e)
+            if "mfa" in msg.lower() or "otp" in msg.lower() or "challenge" in msg.lower():
+                return False, "MFA required — enter your 6-digit authenticator code and try again."
+            if "credential" in msg.lower() or "password" in msg.lower() or "invalid" in msg.lower():
+                return False, "Invalid email or password."
+            return False, f"Login failed: {msg}"
 
     def logout(self) -> None:
         try:

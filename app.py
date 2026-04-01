@@ -88,6 +88,12 @@ if "cache_loaded" not in st.session_state:
     st.session_state.cache_loaded = False
 if "from_cache" not in st.session_state:
     st.session_state.from_cache = False
+if "rh_needs_mfa" not in st.session_state:
+    st.session_state.rh_needs_mfa = False
+if "rh_user" not in st.session_state:
+    st.session_state.rh_user = ""
+if "rh_pass" not in st.session_state:
+    st.session_state.rh_pass = ""
 if "theme_color" not in st.session_state:
     st.session_state.theme_color = _DEFAULT_COLOR
 _PALETTE_NAMES = [name for name, _ in MIAMI_VICE_PALETTE]
@@ -413,18 +419,59 @@ with st.sidebar:
                 st.rerun()
 
         elif selected_broker_name == "Robinhood":
-            with st.form("rh_login"):
-                rh_user = st.text_input("Email", value=_secret("ROBINHOOD_USERNAME"))
-                rh_pass = st.text_input("Password", value=_secret("ROBINHOOD_PASSWORD"), type="password")
-                rh_mfa  = st.text_input("MFA Code (if required)", value="")
-                if st.form_submit_button("Connect Robinhood", use_container_width=True):
-                    with st.spinner("Connecting..."):
-                        ok, msg = broker.login(username=rh_user, password=rh_pass, mfa_code=rh_mfa)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
+            if not st.session_state.rh_needs_mfa:
+                # Step 1 — credentials
+                with st.form("rh_login"):
+                    rh_user = st.text_input("Email", value=_secret("ROBINHOOD_USERNAME"))
+                    rh_pass = st.text_input("Password", value=_secret("ROBINHOOD_PASSWORD"), type="password")
+                    if st.form_submit_button("Connect", use_container_width=True, type="primary"):
+                        if not rh_user or not rh_pass:
+                            st.error("Email and password are required.")
+                        else:
+                            with st.spinner("Connecting to Robinhood..."):
+                                ok, msg = broker.login(username=rh_user, password=rh_pass)
+                            if ok:
+                                st.success(msg)
+                                st.rerun()
+                            elif "mfa" in msg.lower() or "otp" in msg.lower() or "challenge" in msg.lower():
+                                # Robinhood requires MFA — move to step 2
+                                st.session_state.rh_user = rh_user
+                                st.session_state.rh_pass = rh_pass
+                                st.session_state.rh_needs_mfa = True
+                                st.rerun()
+                            else:
+                                st.error(msg)
+            else:
+                # Step 2 — MFA code (shown immediately after step 1 redirects here)
+                st.info("Enter your 6-digit authenticator code — it expires in 30 seconds.")
+                with st.form("rh_mfa"):
+                    rh_mfa = st.text_input("MFA Code", max_chars=6, placeholder="123456")
+                    col_a, col_b = st.columns(2)
+                    submit_mfa = col_a.form_submit_button("Verify", use_container_width=True, type="primary")
+                    cancel_mfa = col_b.form_submit_button("Cancel", use_container_width=True)
+                if cancel_mfa:
+                    st.session_state.rh_needs_mfa = False
+                    st.session_state.rh_user = ""
+                    st.session_state.rh_pass = ""
+                    st.rerun()
+                if submit_mfa:
+                    if not rh_mfa or len(rh_mfa.strip()) < 6:
+                        st.error("Enter the full 6-digit code.")
                     else:
-                        st.error(f"Login failed: {msg}")
+                        with st.spinner("Verifying MFA..."):
+                            ok, msg = broker.login(
+                                username=st.session_state.rh_user,
+                                password=st.session_state.rh_pass,
+                                mfa_code=rh_mfa.strip(),
+                            )
+                        if ok:
+                            st.session_state.rh_needs_mfa = False
+                            st.session_state.rh_user = ""
+                            st.session_state.rh_pass = ""
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
         elif selected_broker_name == "Alpaca":
             with st.form("alpaca_login"):
