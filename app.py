@@ -15,10 +15,12 @@ Run with:
 import os
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -82,6 +84,10 @@ if "last_scan_time" not in st.session_state:
     st.session_state.last_scan_time = None
 if "order_feedback" not in st.session_state:
     st.session_state.order_feedback = None
+if "cache_loaded" not in st.session_state:
+    st.session_state.cache_loaded = False
+if "from_cache" not in st.session_state:
+    st.session_state.from_cache = False
 if "theme_color" not in st.session_state:
     st.session_state.theme_color = _DEFAULT_COLOR
 _PALETTE_NAMES = [name for name, _ in MIAMI_VICE_PALETTE]
@@ -189,6 +195,40 @@ def _make_volume_chart(ticker: str):
         return fig
     except Exception:
         return None
+
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def _load_gist_cache(gist_id: str) -> Optional[dict]:
+    """Fetch the latest auto-scan results from the GitHub Gist cache (TTL 2h)."""
+    try:
+        resp = requests.get(
+            f"https://api.github.com/gists/{gist_id}",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        content = resp.json()["files"]["scan_cache.json"]["content"]
+        return json.loads(content)
+    except Exception:
+        return None
+
+
+# Auto-load Gist cache on first page render
+_gist_id = _secret("GIST_ID", "")
+if _gist_id and not st.session_state.cache_loaded:
+    _cached = _load_gist_cache(_gist_id)
+    if _cached and _cached.get("results"):
+        _df_cached = pd.DataFrame(_cached["results"])
+        if not _df_cached.empty:
+            st.session_state.scan_results = _df_cached
+            _ts = _cached.get("scanned_at", "")
+            try:
+                _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+                st.session_state.last_scan_time = _dt
+            except Exception:
+                pass
+            st.session_state.from_cache = True
+    st.session_state.cache_loaded = True
 
 
 # Apply selected theme colour
@@ -416,6 +456,20 @@ with st.sidebar:
 
 st.title("Investment Opportunity Agent")
 st.caption("Scanning all US-listed equities via SEC EDGAR (~10,000+ tickers)")
+
+# Staleness banner for cached results
+if st.session_state.from_cache and st.session_state.last_scan_time:
+    _scan_dt = st.session_state.last_scan_time
+    if _scan_dt.tzinfo is None:
+        _scan_dt = _scan_dt.replace(tzinfo=timezone.utc)
+    _age = datetime.now(timezone.utc) - _scan_dt
+    _mins = int(_age.total_seconds() / 60)
+    _age_str = f"{_mins} min ago" if _mins < 60 else f"{_mins // 60}h {_mins % 60}m ago"
+    st.info(
+        f"Showing auto-scan results from **{_age_str}** "
+        f"· Auto-scans run every 2h during market hours "
+        f"· Click **Run Full Scan** for live results."
+    )
 _active = []
 if use_market_cap:  _active.append(f"Mkt cap > ${min_cap/1e9:.0f}B")
 if use_pe:          _active.append(f"P/E ≤ {max_pe}")
@@ -433,6 +487,7 @@ with col_status:
         st.info(f"Last scan: {st.session_state.last_scan_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 if run_scan:
+    st.session_state.from_cache = False
     progress_bar = st.progress(0.0)
     status_text = st.empty()
 
