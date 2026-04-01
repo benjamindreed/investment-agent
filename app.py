@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 from screener import screen_stocks
 from sentiment import analyze_sentiment, filter_negative_coverage
-from robinhood_client import RobinhoodClient
+from brokerage_client import BaseBrokerageClient, BROKERS, BROKER_LOGOS, UNSUPPORTED_BROKERS, make_client
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -55,8 +55,10 @@ st.set_page_config(
 # Session state initialisation
 # ---------------------------------------------------------------------------
 
-if "rh_client" not in st.session_state:
-    st.session_state.rh_client = RobinhoodClient()
+if "broker_client" not in st.session_state:
+    st.session_state.broker_client = None          # BaseBrokerageClient or None
+if "selected_broker" not in st.session_state:
+    st.session_state.selected_broker = "Robinhood"
 if "scan_results" not in st.session_state:
     st.session_state.scan_results = None          # pd.DataFrame | None
 if "sentiment_map" not in st.session_state:
@@ -232,42 +234,84 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Robinhood login ---
-    st.subheader("Robinhood")
-    rh: RobinhoodClient = st.session_state.rh_client
+    # --- Brokerage login ---
+    st.subheader("Brokerage")
 
-    if rh.logged_in:
-        buying_power = rh.get_buying_power()
-        st.success(f"Connected  |  ${buying_power:,.2f} available")
-        if st.button("Log Out", use_container_width=True):
-            rh.logout()
-            st.rerun()
+    broker_options = list(BROKERS.keys()) + list(UNSUPPORTED_BROKERS.keys())
+    broker_labels = [
+        f"{BROKER_LOGOS.get(b, '⚪')} {b}" for b in list(BROKERS.keys())
+    ] + [f"⚫ {b} (unavailable)" for b in UNSUPPORTED_BROKERS.keys()]
+
+    prev_broker = st.session_state.selected_broker
+    broker_idx = st.selectbox(
+        "Select your brokerage",
+        options=range(len(broker_options)),
+        format_func=lambda i: broker_labels[i],
+        index=list(BROKERS.keys()).index(prev_broker) if prev_broker in BROKERS else 0,
+        label_visibility="collapsed",
+    )
+    selected_broker_name = broker_options[broker_idx]
+
+    # Reset client when broker changes
+    if selected_broker_name != st.session_state.selected_broker:
+        if st.session_state.broker_client:
+            st.session_state.broker_client.logout()
+        st.session_state.broker_client = None
+        st.session_state.selected_broker = selected_broker_name
+        st.rerun()
+
+    # Show unavailable notice
+    if selected_broker_name in UNSUPPORTED_BROKERS:
+        st.info(f"**{selected_broker_name}** does not offer a public trading API for individual accounts.\n\n_{UNSUPPORTED_BROKERS[selected_broker_name]}_")
+        broker = None
     else:
-        with st.form("rh_login"):
-            rh_user = st.text_input(
-                "Email",
-                value=_secret("ROBINHOOD_USERNAME"),
-            )
-            rh_pass = st.text_input(
-                "Password",
-                value=_secret("ROBINHOOD_PASSWORD"),
-                type="password",
-            )
-            rh_mfa = st.text_input("MFA Code (if required)", value="")
-            submitted = st.form_submit_button("Connect Robinhood", use_container_width=True)
-            if submitted:
-                with st.spinner("Connecting..."):
-                    ok, msg = rh.login(rh_user, rh_pass, rh_mfa)
-                if ok:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(f"Login failed: {msg}")
+        # Ensure a client exists for the selected broker
+        if st.session_state.broker_client is None or \
+                type(st.session_state.broker_client).__name__ != f"{selected_broker_name}Client":
+            st.session_state.broker_client = make_client(selected_broker_name)
+        broker: BaseBrokerageClient = st.session_state.broker_client
+
+        if broker.logged_in:
+            buying_power = broker.get_buying_power()
+            st.success(f"Connected  |  ${buying_power:,.2f} available")
+            if st.button("Log Out", use_container_width=True):
+                broker.logout()
+                st.rerun()
+
+        elif selected_broker_name == "Robinhood":
+            with st.form("rh_login"):
+                rh_user = st.text_input("Email", value=_secret("ROBINHOOD_USERNAME"))
+                rh_pass = st.text_input("Password", value=_secret("ROBINHOOD_PASSWORD"), type="password")
+                rh_mfa  = st.text_input("MFA Code (if required)", value="")
+                if st.form_submit_button("Connect Robinhood", use_container_width=True):
+                    with st.spinner("Connecting..."):
+                        ok, msg = broker.login(username=rh_user, password=rh_pass, mfa_code=rh_mfa)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(f"Login failed: {msg}")
+
+        elif selected_broker_name == "Alpaca":
+            with st.form("alpaca_login"):
+                alpaca_key    = st.text_input("API Key",    value=_secret("ALPACA_API_KEY"),    type="password")
+                alpaca_secret = st.text_input("API Secret", value=_secret("ALPACA_API_SECRET"), type="password")
+                alpaca_paper  = st.checkbox("Paper trading account", value=True,
+                                            help="Use a paper (simulated) account. Uncheck for live trading.")
+                st.caption("Get API keys free at [alpaca.markets](https://alpaca.markets)")
+                if st.form_submit_button("Connect Alpaca", use_container_width=True):
+                    with st.spinner("Connecting..."):
+                        ok, msg = broker.login(api_key=alpaca_key, api_secret=alpaca_secret, paper=alpaca_paper)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(f"Login failed: {msg}")
 
     st.divider()
     st.caption(
         "Data: Yahoo Finance / NewsAPI / Google News\n"
-        "Trading: Robinhood (unofficial API via robin-stocks)\n\n"
+        "Trading: Robinhood (robin-stocks) · Alpaca (alpaca-py)\n\n"
         "_Not financial advice. Use at your own risk._"
     )
 
@@ -500,10 +544,11 @@ else:
         # --- Trade panel ---
         st.subheader("Place Order")
 
-        if not rh.logged_in:
-            st.warning("Connect your Robinhood account in the sidebar to trade.")
+        broker = st.session_state.broker_client
+        if not broker or not broker.logged_in:
+            st.warning("Connect a brokerage account in the sidebar to trade.")
         else:
-            buying_power = rh.get_buying_power()
+            buying_power = broker.get_buying_power()
             st.caption(f"Buying power available: **${buying_power:,.2f}**")
 
             order_tab1, order_tab2, order_tab3 = st.tabs(
@@ -528,7 +573,7 @@ else:
                     disabled=est_cost > buying_power,
                 ):
                     with st.spinner("Placing order..."):
-                        result = rh.place_market_buy(selected_ticker, shares_qty)
+                        result = broker.place_market_buy(selected_ticker, shares_qty)
                     st.session_state.order_feedback = result
 
             # --- Tab 2: market buy by dollars ---
@@ -550,7 +595,7 @@ else:
                     disabled=dollar_amt > buying_power,
                 ):
                     with st.spinner("Placing order..."):
-                        result = rh.place_dollar_buy(selected_ticker, dollar_amt)
+                        result = broker.place_dollar_buy(selected_ticker, dollar_amt)
                     st.session_state.order_feedback = result
 
             # --- Tab 3: limit buy ---
@@ -579,7 +624,7 @@ else:
                     disabled=est_lmt_cost > buying_power,
                 ):
                     with st.spinner("Placing order..."):
-                        result = rh.place_limit_buy(selected_ticker, lmt_shares, lmt_price)
+                        result = broker.place_limit_buy(selected_ticker, lmt_shares, lmt_price)
                     st.session_state.order_feedback = result
 
             # --- Order feedback ---
@@ -599,9 +644,10 @@ else:
     st.divider()
 
     # --- Holdings snapshot ---
-    if rh.logged_in:
-        with st.expander("My Robinhood Holdings"):
-            holdings = rh.get_holdings()
+    broker = st.session_state.broker_client
+    if broker and broker.logged_in:
+        with st.expander(f"My {broker.broker_name} Holdings"):
+            holdings = broker.get_holdings()
             if holdings:
                 h_df = pd.DataFrame(holdings)
                 h_df["average_buy_price"] = h_df["average_buy_price"].apply(

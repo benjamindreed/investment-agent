@@ -6,6 +6,7 @@ numpy>=1.24.0
 plotly>=5.18.0
 vaderSentiment>=3.3.2
 robin-stocks>=3.0.4
+alpaca-py>=0.20.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 lxml>=5.0.0
