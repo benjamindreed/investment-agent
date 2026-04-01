@@ -22,6 +22,23 @@ import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
 
+# ---------------------------------------------------------------------------
+# Miami Vice colour palette
+# ---------------------------------------------------------------------------
+
+MIAMI_VICE_PALETTE = [
+    ("Hot Pink",       "#FF6EC7"),
+    ("Neon Cyan",      "#00E5FF"),
+    ("Electric Purple","#B44FFF"),
+    ("Coral",          "#FF6B35"),
+    ("Ocean Teal",     "#00C9C8"),
+    ("Magenta",        "#FF00CC"),
+    ("Electric Blue",  "#00BFFF"),
+    ("Sunset Gold",    "#FFB347"),
+]
+
+_DEFAULT_COLOR = "#FF6EC7"  # Hot Pink
+
 from screener import screen_stocks
 from sentiment import analyze_sentiment, filter_negative_coverage
 from brokerage_client import BaseBrokerageClient, BROKERS, BROKER_LOGOS, UNSUPPORTED_BROKERS, make_client
@@ -67,6 +84,8 @@ if "last_scan_time" not in st.session_state:
     st.session_state.last_scan_time = None
 if "order_feedback" not in st.session_state:
     st.session_state.order_feedback = None
+if "theme_color" not in st.session_state:
+    st.session_state.theme_color = _DEFAULT_COLOR
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +108,48 @@ def _sentiment_badge(avg: float) -> str:
     if avg < 0.05:
         return "🟡 Neutral"
     return "🟢 Positive"
+
+
+def _inject_theme(color: str) -> None:
+    """Inject CSS to apply the selected Miami Vice accent colour site-wide."""
+    st.markdown(f"""
+    <style>
+    /* Primary action buttons */
+    button[kind="primary"],
+    button[data-testid="baseButton-primary"] {{
+        background-color: {color} !important;
+        border-color: {color} !important;
+        color: #0A0F0A !important;
+    }}
+    button[kind="primary"]:hover,
+    button[data-testid="baseButton-primary"]:hover {{
+        opacity: 0.85;
+        background-color: {color} !important;
+    }}
+    /* Links */
+    a {{ color: {color} !important; }}
+    /* Progress bar fill */
+    div[data-testid="stProgressBar"] > div > div {{
+        background-color: {color} !important;
+    }}
+    /* Slider active track & thumb */
+    div[data-baseweb="slider"] [role="slider"] {{
+        background-color: {color} !important;
+        border-color: {color} !important;
+    }}
+    /* Toggle (on state) */
+    div[data-baseweb="toggle"] div[data-checked="true"] {{
+        background-color: {color} !important;
+    }}
+    /* Metric delta colour override */
+    [data-testid="stMetricDelta"] svg {{ fill: {color} !important; }}
+    /* Selected tab underline */
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        border-bottom-color: {color} !important;
+        color: {color} !important;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
 
 
 def _make_volume_chart(ticker: str):
@@ -130,6 +191,9 @@ def _make_volume_chart(ticker: str):
         return None
 
 
+# Apply selected theme colour
+_inject_theme(st.session_state.theme_color)
+
 # ---------------------------------------------------------------------------
 # Sidebar — configuration & Robinhood login
 # ---------------------------------------------------------------------------
@@ -137,6 +201,29 @@ def _make_volume_chart(ticker: str):
 with st.sidebar:
     st.title("Investment Agent")
     st.caption("Contrarian large-cap screener")
+
+    # --- Miami Vice theme picker ---
+    st.subheader("Theme")
+    _cols = st.columns(4)
+    for _i, (_name, _color) in enumerate(MIAMI_VICE_PALETTE):
+        with _cols[_i % 4]:
+            _selected = _color == st.session_state.theme_color
+            st.markdown(
+                f'<div style="background:{_color};height:22px;border-radius:4px;'
+                f'border:{"2px solid #fff" if _selected else "1px solid #444"};'
+                f'margin-bottom:3px;"></div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                _name.split()[0],
+                key=f"mv_{_color[1:]}",
+                use_container_width=True,
+                help=f"{_name}  {_color}",
+            ):
+                st.session_state.theme_color = _color
+                st.rerun()
+
+    st.divider()
 
     # --- Scan parameters ---
     st.subheader("Scan Parameters")
@@ -232,12 +319,6 @@ with st.sidebar:
         help="Provides broader news coverage. Free at newsapi.org",
     )
 
-    x_bearer_token = st.text_input(
-        "X.com Bearer Token (optional)",
-        value=_secret("X_BEARER_TOKEN"),
-        type="password",
-        help="Includes posts from X.com in sentiment analysis. Requires Basic tier ($100/mo) at developer.x.com",
-    )
 
     st.divider()
 
@@ -317,7 +398,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        "Data: Yahoo Finance / NewsAPI / Google News / X.com\n"
+        "Data: Yahoo Finance · NewsAPI · Google News\n"
         "Trading: Robinhood (robin-stocks) · Alpaca (alpaca-py)\n\n"
         "_Not financial advice. Use at your own risk._"
     )
@@ -394,7 +475,7 @@ if run_scan:
                 sent_bar.progress((idx + 1) / total_sent)
                 result = analyze_sentiment(
                     item["ticker"], item["name"], news_api_key,
-                    days=sentiment_days, x_bearer_token=x_bearer_token,
+                    days=sentiment_days,
                 )
                 sentiment_map[item["ticker"]] = result
                 if result["has_negative_coverage"]:
