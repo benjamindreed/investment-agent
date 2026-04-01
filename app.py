@@ -200,7 +200,7 @@ _inject_theme(st.session_state.theme_color)
 
 with st.sidebar:
     st.title("Investment Agent")
-    st.caption("Contrarian large-cap screener")
+    st.caption("US equity screener — full market")
 
     # --- Miami Vice theme picker ---
     _current_name = next(
@@ -306,6 +306,18 @@ with st.sidebar:
 
     st.divider()
 
+    # Liquidity gate
+    st.markdown("**Min Avg Daily Volume**")
+    min_avg_vol = st.select_slider(
+        "Minimum 20-day average daily volume",
+        options=[10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000],
+        value=100_000,
+        format_func=lambda v: f"{v:,}",
+        help="Excludes thinly traded stocks. Lower = more results but slower scan.",
+    )
+
+    st.divider()
+
     news_api_key = st.text_input(
         "NewsAPI Key (optional)",
         value=_secret("NEWS_API_KEY"),
@@ -403,6 +415,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 
 st.title("Investment Opportunity Agent")
+st.caption("Scanning all US-listed equities via SEC EDGAR (~10,000+ tickers)")
 _active = []
 if use_market_cap:  _active.append(f"Mkt cap > ${min_cap/1e9:.0f}B")
 if use_pe:          _active.append(f"P/E ≤ {max_pe}")
@@ -423,11 +436,12 @@ if run_scan:
     progress_bar = st.progress(0.0)
     status_text = st.empty()
 
-    def ui_progress(step: int, total_steps: int, msg: str):
-        progress_bar.progress(step / total_steps)
+    def ui_progress(current: int, total: int, msg: str):
+        pct = min(current / total, 1.0) if total else 0.0
+        progress_bar.progress(pct)
         status_text.write(f"**{msg}**")
 
-    # --- Step 1+2: Fundamental screen ---
+    # --- Stock screener (universe → volume → fundamentals) ---
     with st.spinner("Running stock screener..."):
         df = screen_stocks(
             min_market_cap=min_cap       if use_market_cap else 0,
@@ -435,6 +449,7 @@ if run_scan:
             min_vol_ratio=min_vol        if use_volume     else 0,
             max_vol_ratio=max_vol        if use_volume     else 99999,
             min_5yr_high_pct=min_5yr_pct if use_5yr_high  else 0,
+            min_avg_volume=min_avg_vol,
             progress_callback=ui_progress,
         )
 
