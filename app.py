@@ -276,7 +276,7 @@ with st.sidebar:
         st.markdown("**Market Cap**")
     min_cap = st.number_input(
         "Min Market Cap ($B)",
-        min_value=1.0, max_value=500.0, value=5.0, step=1.0,
+        min_value=0.1, max_value=500.0, value=0.5, step=0.1,
         disabled=not use_market_cap,
     ) * 1e9
     if not use_market_cap:
@@ -291,7 +291,9 @@ with st.sidebar:
     with col_l:
         st.markdown("**P/E Ratio**")
     max_pe = st.slider("Max P/E Ratio", 5, 100, 50, disabled=not use_pe)
-    if not use_pe:
+    if use_pe:
+        st.caption("Stocks with no P/E data (turnarounds, recent losses) are included regardless.")
+    else:
         st.caption("_Filter off — all P/E ratios included_")
 
     st.divider()
@@ -304,7 +306,7 @@ with st.sidebar:
         st.markdown("**Volume Spike**")
     vol_range = st.slider(
         "Volume Ratio Range (× 20-day avg)",
-        0.5, 5.0, (1.2, 5.0), step=0.1,
+        0.5, 20.0, (2.0, 20.0), step=0.5,
         disabled=not use_volume,
     )
     min_vol, max_vol = vol_range
@@ -341,12 +343,12 @@ with st.sidebar:
         st.markdown("**5-Year High Premium**")
     min_5yr_pct = st.slider(
         "5yr high at least X% above current price",
-        min_value=0, max_value=200, value=10, step=5,
+        min_value=0, max_value=200, value=20, step=5,
         disabled=not use_5yr_high,
-        help="Finds stocks trading significantly below their 5-year peak.",
+        help="Sweet spot is 20–35%: beaten down but not distressed. Stocks where history data is unavailable are included regardless.",
     )
     if use_5yr_high:
-        st.caption(f"5yr high ≥ current price + **{min_5yr_pct}%**")
+        st.caption(f"5yr high ≥ current price + **{min_5yr_pct}%** · stocks with no history data pass through")
     else:
         st.caption("_Filter off — 5yr high still shown in results_")
 
@@ -643,11 +645,20 @@ else:
     display_df["market_cap"] = display_df["market_cap"].apply(_fmt_market_cap)
     display_df["volume_ratio"] = display_df["vol_ratio"].apply(lambda x: f"{x:.2f}×")
 
-    table_cols = ["ticker", "name", "sector", "price", "market_cap", "pe_ratio", "volume_ratio"]
+    def _fmt_ratio(v) -> str:
+        return f"{v:.1f}" if pd.notna(v) and v is not None else "—"
+
+    display_df["pe_disp"]  = display_df["pe_ratio"].apply(_fmt_ratio)
+    display_df["pb_disp"]  = display_df["pb_ratio"].apply(_fmt_ratio) if "pb_ratio" in display_df.columns else "—"
+    display_df["ps_disp"]  = display_df["ps_ratio"].apply(_fmt_ratio) if "ps_ratio" in display_df.columns else "—"
+    display_df["evebitda_disp"] = display_df["ev_ebitda"].apply(_fmt_ratio) if "ev_ebitda" in display_df.columns else "—"
+
+    table_cols = ["ticker", "name", "sector", "price", "market_cap", "pe_disp", "pb_disp", "ps_disp", "evebitda_disp", "volume_ratio"]
     col_rename = {
         "ticker": "Ticker", "name": "Company", "sector": "Sector",
         "price": "Price ($)", "market_cap": "Mkt Cap",
-        "pe_ratio": "P/E", "volume_ratio": "Vol Ratio",
+        "pe_disp": "P/E", "pb_disp": "P/B", "ps_disp": "P/S",
+        "evebitda_disp": "EV/EBITDA", "volume_ratio": "Vol Ratio",
     }
 
     if "5yr_high" in display_df.columns:

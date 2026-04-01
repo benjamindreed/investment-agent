@@ -16,6 +16,7 @@ Performance
 - Fundamentals fetched in parallel with ThreadPoolExecutor (8 workers)
 - Only tickers that pass the volume pre-filter hit the fundamentals path
 """
+import math
 import re
 import time
 import requests
@@ -24,6 +25,17 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
+
+
+def _clean_float(value) -> Optional[float]:
+    """Return float if value is a finite number, else None."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -195,24 +207,38 @@ def _fetch_single_ticker(
     try:
         info = yf.Ticker(ticker).info
 
-        market_cap = info.get("marketCap") or 0
+        market_cap = _clean_float(info.get("marketCap")) or 0
         if market_cap < min_market_cap:
             return None
 
-        pe = info.get("trailingPE") or info.get("forwardPE")
-        if pe is None or pe <= 0 or pe > max_pe:
-            return None
-
-        price = (
+        price = _clean_float(
             info.get("currentPrice")
             or info.get("regularMarketPrice")
             or info.get("previousClose")
-            or 0
-        )
+        ) or 0
 
-        # 5-year high
-        five_yr_high = None
-        five_yr_high_pct = None
+        # P/E — use trailing first, forward as fallback.
+        # If neither is available, do NOT exclude: stocks in turnaround or
+        # with recent losses often have no P/E but can still be undervalued.
+        # Only exclude when we have a valid P/E and it exceeds the cap.
+        pe = _clean_float(info.get("trailingPE"))
+        if pe is None or pe <= 0:
+            pe = _clean_float(info.get("forwardPE"))
+        if pe is not None and pe <= 0:
+            pe = None
+        if pe is not None and pe > max_pe:
+            return None
+
+        # Supplementary valuation metrics
+        pb  = _clean_float(info.get("priceToBook"))
+        ps  = _clean_float(info.get("priceToSalesTrailing12Months"))
+        ev_ebitda = _clean_float(info.get("enterpriseToEbitda"))
+        debt_eq   = _clean_float(info.get("debtToEquity"))
+
+        # 5-year high — if history unavailable, do NOT exclude the stock.
+        # Only apply the filter when we actually have the data.
+        five_yr_high: Optional[float] = None
+        five_yr_high_pct: Optional[float] = None
         try:
             hist_5y = yf.Ticker(ticker).history(period="5y")
             if not hist_5y.empty:
@@ -220,10 +246,10 @@ def _fetch_single_ticker(
                 if price > 0:
                     five_yr_high_pct = round((five_yr_high - price) / price * 100, 1)
         except Exception:
-            pass
+            pass  # data unavailable — let the stock through
 
-        if min_5yr_high_pct > 0:
-            if five_yr_high_pct is None or five_yr_high_pct < min_5yr_high_pct:
+        if min_5yr_high_pct > 0 and five_yr_high_pct is not None:
+            if five_yr_high_pct < min_5yr_high_pct:
                 return None
 
         vol_info = volume_map[ticker]
@@ -233,7 +259,11 @@ def _fetch_single_ticker(
             "sector":             info.get("sector", "N/A"),
             "price":              round(price, 2),
             "market_cap":         market_cap,
-            "pe_ratio":           round(pe, 2),
+            "pe_ratio":           round(pe, 2) if pe is not None else None,
+            "pb_ratio":           round(pb, 2) if pb is not None else None,
+            "ps_ratio":           round(ps, 2) if ps is not None else None,
+            "ev_ebitda":          round(ev_ebitda, 2) if ev_ebitda is not None else None,
+            "debt_to_equity":     round(debt_eq, 2) if debt_eq is not None else None,
             "current_volume":     vol_info["current_volume"],
             "avg_volume":         vol_info["avg_volume"],
             "vol_ratio":          vol_info["vol_ratio"],
@@ -251,11 +281,11 @@ def _fetch_single_ticker(
 # ---------------------------------------------------------------------------
 
 def screen_stocks(
-    min_market_cap: float = 5e9,
+    min_market_cap: float = 500e6,
     max_pe: float = 50.0,
-    min_vol_ratio: float = 1.2,
-    max_vol_ratio: float = 5.0,
-    min_5yr_high_pct: float = 0.0,
+    min_vol_ratio: float = 2.0,
+    max_vol_ratio: float = 20.0,
+    min_5yr_high_pct: float = 20.0,
     min_avg_volume: int = 100_000,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> pd.DataFrame:

@@ -30,12 +30,12 @@ GIST_ID    = os.environ.get("GIST_ID", "")
 
 # Default scan parameters — kept in sync with app.py defaults
 SCAN_PARAMS = dict(
-    min_market_cap=5e9,
-    max_pe=50,
-    min_vol_ratio=1.2,
-    max_vol_ratio=5.0,
-    min_5yr_high_pct=10,
-    min_avg_volume=100_000,
+    min_market_cap=500e6,   # $500M — captures small/mid-cap opportunities
+    max_pe=50,              # applies only when P/E data is available
+    min_vol_ratio=2.0,      # 2x = meaningful spike (research: 2.5-3x is institutional signal)
+    max_vol_ratio=20.0,     # no effective ceiling — keep high-spike events
+    min_5yr_high_pct=20,    # sweet spot per research: 20-35% off 5yr high
+    min_avg_volume=100_000, # liquidity gate
 )
 
 
