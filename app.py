@@ -163,7 +163,7 @@ with st.sidebar:
         use_pe = st.toggle("", value=True, key="tog_pe", help="Enable P/E ratio filter")
     with col_l:
         st.markdown("**P/E Ratio**")
-    max_pe = st.slider("Max P/E Ratio", 5, 100, 35, disabled=not use_pe)
+    max_pe = st.slider("Max P/E Ratio", 5, 100, 50, disabled=not use_pe)
     if not use_pe:
         st.caption("_Filter off — all P/E ratios included_")
 
@@ -177,7 +177,7 @@ with st.sidebar:
         st.markdown("**Volume Spike**")
     vol_range = st.slider(
         "Volume Ratio Range (× 20-day avg)",
-        0.5, 5.0, (1.5, 2.0), step=0.1,
+        0.5, 5.0, (1.2, 5.0), step=0.1,
         disabled=not use_volume,
     )
     min_vol, max_vol = vol_range
@@ -194,7 +194,7 @@ with st.sidebar:
         st.markdown("**Negative Sentiment**")
     sentiment_weeks = st.slider(
         "Sentiment Lookback (weeks)",
-        min_value=1, max_value=13, value=13,
+        min_value=1, max_value=13, value=5,
         disabled=not use_sentiment,
         help="How far back to search for negative news. 13 weeks ≈ 90 days.",
     )
@@ -214,7 +214,7 @@ with st.sidebar:
         st.markdown("**5-Year High Premium**")
     min_5yr_pct = st.slider(
         "5yr high at least X% above current price",
-        min_value=0, max_value=200, value=20, step=5,
+        min_value=0, max_value=200, value=10, step=5,
         disabled=not use_5yr_high,
         help="Finds stocks trading significantly below their 5-year peak.",
     )
